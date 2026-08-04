@@ -6,7 +6,23 @@ Current-session context inspection with a native OpenCode TUI modal.
 
 `/context` opens a large modal over the current screen with recorded token usage, estimated context utilization, message and tool activity, and the largest retained context contributors. It does not invoke an LLM to build the report.
 
-![opencode-context modal showing token usage, context utilization, messages, tools, and retained content](https://raw.githubusercontent.com/ZackarySantana/opencode-context/main/assets/oc-context-demo.png)
+### Overview
+
+Provider-recorded token usage, estimated context utilization, cache efficiency, and session activity.
+
+![opencode-context Overview tab showing token usage, context utilization, cache efficiency, and session activity](https://raw.githubusercontent.com/ZackarySantana/opencode-context/main/assets/oc-context-demo.png)
+
+### Content
+
+The largest observable retained messages, reasoning, attachments, and tool outputs.
+
+![opencode-context Content tab showing the largest retained context contributors](https://raw.githubusercontent.com/ZackarySantana/opencode-context/main/assets/oc-context-demo-2.png)
+
+### Environment
+
+Observable instructions, agents, skills, MCP servers, and available tools.
+
+![opencode-context Environment tab showing instructions, agents, skills, MCP servers, and tools](https://raw.githubusercontent.com/ZackarySantana/opencode-context/main/assets/oc-context-demo-3.png)
 
 Published on npm as [`opencode-context`](https://www.npmjs.com/package/opencode-context).
 
