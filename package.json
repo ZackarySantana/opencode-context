@@ -1,0 +1,59 @@
+{
+  "name": "opencode-context",
+  "version": "0.1.0",
+  "description": "Native OpenCode TUI modal for inspecting current-session context usage",
+  "type": "module",
+  "author": "ZackarySantana",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZackarySantana/opencode-context.git"
+  },
+  "homepage": "https://github.com/ZackarySantana/opencode-context#readme",
+  "bugs": {
+    "url": "https://github.com/ZackarySantana/opencode-context/issues"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    "./tui": {
+      "import": "./dist/tui.js",
+      "types": "./dist/tui.d.ts"
+    }
+  },
+  "engines": {
+    "opencode": "^1.18.11"
+  },
+  "scripts": {
+    "build": "bun run build.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "prepublishOnly": "bun run test && bun run typecheck && bun run build"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "context",
+    "tokens",
+    "tui"
+  ],
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.18.11 <2",
+    "@opentui/core": ">=0.4.5 <1",
+    "@opentui/keymap": ">=0.4.5 <1",
+    "@opentui/solid": ">=0.4.5 <1",
+    "solid-js": ">=1.9.10 <2"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.18.11",
+    "@opentui/core": "0.4.5",
+    "@opentui/keymap": "0.4.5",
+    "@opentui/solid": "0.4.5",
+    "@types/bun": "latest",
+    "solid-js": "1.9.12",
+    "typescript": "5.8.2"
+  }
+}
