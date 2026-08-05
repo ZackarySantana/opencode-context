@@ -27,14 +27,14 @@ type Skin = {
 }
 
 const commands = {
-  open: "opencode-context.open",
-  close: "opencode-context.close",
-  next: "opencode-context.tab.next",
-  previous: "opencode-context.tab.previous",
-  down: "opencode-context.row.down",
-  up: "opencode-context.row.up",
-  refresh: "opencode-context.refresh",
-  export: "opencode-context.export",
+  open: "opencode-context-tui.open",
+  close: "opencode-context-tui.close",
+  next: "opencode-context-tui.tab.next",
+  previous: "opencode-context-tui.tab.previous",
+  down: "opencode-context-tui.row.down",
+  up: "opencode-context-tui.row.up",
+  refresh: "opencode-context-tui.refresh",
+  export: "opencode-context-tui.export",
 }
 
 type Controller = {
@@ -365,7 +365,7 @@ const tui: TuiPlugin = async (api) => {
 }
 
 const plugin: TuiPluginModule & { id: string } = {
-  id: "opencode-context",
+  id: "opencode-context-tui",
   tui,
 }
 

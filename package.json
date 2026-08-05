@@ -1,5 +1,5 @@
 {
-  "name": "opencode-context",
+  "name": "opencode-context-tui",
   "version": "0.1.0",
   "description": "Native OpenCode TUI modal for inspecting current-session context usage",
   "type": "module",

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "opencode-context",
+      "name": "opencode-context-tui",
       "devDependencies": {
         "@opencode-ai/plugin": "1.18.11",
         "@opentui/core": "0.4.5",

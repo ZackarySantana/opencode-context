@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test"
 import tuiPlugin from "../src/tui.js"
 
+test("uses the published package name as its plugin ID", () => {
+  expect(tuiPlugin.id).toBe("opencode-context-tui")
+})
+
 test("registers native /context without a route", async () => {
   const layers: Array<{ commands?: Array<Record<string, unknown>>; mode?: string; enabled?: () => boolean }> = []
   const routes: unknown[] = []

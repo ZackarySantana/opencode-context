@@ -36,7 +36,7 @@ export function exportPayload(snapshot: ContextSnapshot) {
 }
 
 export async function writeSnapshot(statePath: string, snapshot: ContextSnapshot) {
-  const directory = join(statePath, "opencode-context", "exports")
+  const directory = join(statePath, "opencode-context-tui", "exports")
   await mkdir(directory, { recursive: true, mode: 0o700 })
   const stamp = snapshot.capturedAt.replaceAll(":", "-").replaceAll(".", "-")
   const path = join(directory, `context-${snapshot.sessionID ?? "no-session"}-${stamp}.json`)

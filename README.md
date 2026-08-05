@@ -1,6 +1,6 @@
-# opencode-context
+# opencode-context-tui
 
-[![npm](https://img.shields.io/npm/v/opencode-context)](https://www.npmjs.com/package/opencode-context)
+[![npm](https://img.shields.io/npm/v/opencode-context-tui)](https://www.npmjs.com/package/opencode-context-tui)
 
 Current-session context inspection with a native OpenCode TUI modal.
 
@@ -24,7 +24,7 @@ Observable instructions, agents, skills, MCP servers, and available tools.
 
 ![opencode-context Environment tab showing instructions, agents, skills, MCP servers, and tools](https://raw.githubusercontent.com/ZackarySantana/opencode-context/main/assets/oc-context-demo-3.png)
 
-Published on npm as [`opencode-context`](https://www.npmjs.com/package/opencode-context).
+Published on npm as [`opencode-context-tui`](https://www.npmjs.com/package/opencode-context-tui).
 
 ## Requirements
 
@@ -38,7 +38,7 @@ The TUI plugin API is new and version-coupled. This package declares an `engines
 Install globally so `/context` is available from every project:
 
 ```sh
-opencode plugin --global opencode-context
+opencode plugin --global opencode-context-tui
 ```
 
 The package exposes a TUI entrypoint only. OpenCode updates `~/.config/opencode/tui.json` for the native modal.
@@ -76,7 +76,7 @@ Estimated values are not provider billing totals or an exact reconstruction of t
 Press `e` to write a redacted JSON snapshot under:
 
 ```text
-<opencode-state>/opencode-context/exports/
+<opencode-state>/opencode-context-tui/exports/
 ```
 
 Exports are explicit and stored outside the worktree by default. Likely secrets are redacted, and contributor previews are omitted. Review an export before sharing it.
