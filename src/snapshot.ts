@@ -1,7 +1,7 @@
-import type { Message, Part, Provider } from "@opencode-ai/sdk/v2"
+import type { McpServer, ModelInfo, ModelRef, ProviderInfo, SessionMessageInfo, ToolContent } from "@opencode/client"
 
 export type Provenance = "recorded" | "measured" | "estimated" | "unavailable"
-export type ContributorCategory = "user" | "assistant" | "reasoning" | "tool" | "file"
+export type ContributorCategory = "user" | "assistant" | "reasoning" | "tool" | "file" | "system"
 
 export type TokenUsage = {
   input: number
@@ -60,23 +60,28 @@ export type ContextSnapshot = {
 
 type SnapshotInput = {
   sessionID?: string
-  messages: ReadonlyArray<Message>
-  parts: (messageID: string) => ReadonlyArray<Part>
-  providers: ReadonlyArray<Provider>
+  messages: ReadonlyArray<SessionMessageInfo>
+  retainedMessages?: ReadonlyArray<SessionMessageInfo>
+  providers: ReadonlyArray<ProviderInfo>
+  models?: ReadonlyArray<ModelInfo>
+  model?: ModelRef
   config?: unknown
-  mcp?: ReadonlyArray<{ name: string; status: string; error?: string }>
+  agents?: ReadonlyArray<{ id: string; description?: string }>
+  skills?: ReadonlyArray<{ id: string; description?: string }>
+  mcp?: ReadonlyArray<McpServer>
   tools?: ReadonlyArray<{ id: string; description?: string }>
   capturedAt?: Date
 }
 
 export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
   const messages = dedupe(input.messages, (message) => message.id)
-  const assistant = messages.filter((message) => message.role === "assistant")
-  const latestAssistant = assistant.at(-1)
-  const model = latestAssistant
-    ? resolveModel(input.providers, latestAssistant.providerID, latestAssistant.modelID)
+  const assistant = messages.filter((message) => message.type === "assistant")
+  const selectedModel = input.model ?? assistant.at(-1)?.model
+  const model = selectedModel
+    ? resolveModel(input.providers, input.models ?? [], selectedModel.providerID, selectedModel.id)
     : undefined
   const usage = assistant.reduce<TokenUsage>((total, message) => {
+    if (!message.tokens) return total
     total.input += message.tokens.input
     total.cacheRead += message.tokens.cache.read
     total.cacheWrite += message.tokens.cache.write
@@ -85,18 +90,10 @@ export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
     return total
   }, emptyUsage())
   const contributors: Contributor[] = []
-  const compactions: Array<{ id: string; boundary?: string }> = []
-  let toolCalls = 0
-
-  for (const message of messages) {
-    for (const part of dedupe(input.parts(message.id), (item) => item.id)) {
-      if (part.type === "compaction") {
-        compactions.push({ id: part.id, boundary: part.tail_start_id })
-        continue
-      }
-      if (part.type === "tool") toolCalls += 1
-      contributors.push(...partContributors(message.role, part))
-    }
+  const compactions = messages.filter((message) => message.type === "compaction" && message.status === "completed")
+  const toolCalls = assistant.reduce((total, message) => total + message.content.filter((part) => part.type === "tool").length, 0)
+  for (const message of dedupe(input.retainedMessages ?? messages, (item) => item.id)) {
+    contributors.push(...messageContributors(message))
   }
 
   contributors.sort((a, b) => b.estimatedTokens - a.estimatedTokens || a.id.localeCompare(b.id))
@@ -123,13 +120,13 @@ export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
     usage,
     usageProvenance: "recorded",
     messageCount: {
-      user: messages.filter((message) => message.role === "user").length,
+      user: messages.filter((message) => message.type === "user").length,
       assistant: assistant.length,
     },
     toolCalls,
     compaction: {
       count: compactions.length,
-      latestBoundary: compactions.at(-1)?.boundary,
+      latestBoundary: compactions.at(-1)?.id,
     },
     retained: {
       ...retained,
@@ -139,7 +136,7 @@ export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
     utilization,
     utilizationProvenance: utilization === undefined ? "unavailable" : "estimated",
     cacheEfficiency: cacheBase > 0 ? usage.cacheRead / cacheBase : undefined,
-    environment: environmentItems(input.config, input.mcp, input.tools),
+    environment: environmentItems(input),
     limitations: [
       "Recorded usage comes from assistant messages and is not the retained prompt size.",
       "Retained tokens use a local character approximation and exclude hidden provider payload layers.",
@@ -152,32 +149,36 @@ export function estimateTokens(text: string) {
   return text.length === 0 ? 0 : Math.ceil(text.length / 4)
 }
 
-function partContributors(role: Message["role"], part: Part): Contributor[] {
-  if (part.type === "text" && !part.ignored) {
-    return [contributor(part.id, part.messageID, role, role === "user" ? "User message" : "Assistant response", part.text)]
+function messageContributors(message: SessionMessageInfo): Contributor[] {
+  const row = (id: string, category: ContributorCategory, label: string, text: string) => contributor(id, message.id, category, label, text)
+  if (message.type === "user") {
+    return [
+      row(`${message.id}:text`, "user", "User message", message.text),
+      ...message.files?.map((file, index) => row(`${message.id}:file:${index}`, "file", `File attachment: ${file.name ?? file.mime}`,
+        [file.name, file.mime, file.description, file.source.type === "uri" ? file.source.uri : undefined].filter(Boolean).join(" "))) ?? [],
+    ]
   }
-  if (part.type === "reasoning") {
-    return [contributor(part.id, part.messageID, "reasoning", "Reasoning", part.text)]
+  if (message.type === "assistant") {
+    return message.content.flatMap((part, index): Contributor[] => {
+      const id = `${message.id}:${index}`
+      if (part.type === "text") return [row(id, "assistant", "Assistant response", part.text)]
+      if (part.type === "reasoning") return [row(id, "reasoning", "Reasoning", part.text)]
+      const state = part.state
+      const content: ToolContent[] = state.status === "completed" || state.status === "error" ? state.content ?? [] : []
+      const text = content.filter((item) => item.type === "text").map((item) => item.text).join("\n")
+      const output = text || (state.status === "error" ? state.error.message : "")
+      return [
+        ...output ? [row(id, "tool", `Tool output: ${part.name}`, output)] : [],
+        ...content.flatMap((item, fileIndex) => item.type === "file"
+          ? [row(`${id}:file:${fileIndex}`, "file", `File attachment: ${item.name ?? item.mime}`, [item.name, item.mime, item.uri].filter(Boolean).join(" "))]
+          : []),
+      ]
+    })
   }
-  if (part.type === "tool") {
-    const output = part.state.status === "completed" ? part.state.output : part.state.status === "error" ? part.state.error : ""
-    const rows = output ? [contributor(part.id, part.messageID, "tool", `Tool output: ${part.tool}`, output)] : []
-    if (part.state.status === "completed") {
-      rows.push(...part.state.attachments?.map((file) => fileContributor(file, part.messageID)) ?? [])
-    }
-    return rows
-  }
-  if (part.type === "file") return [fileContributor(part, part.messageID)]
-  if (part.type === "subtask") {
-    return [contributor(part.id, part.messageID, "user", `Subtask: ${part.agent}`, part.prompt)]
-  }
+  if (message.type === "compaction" && message.status === "completed") return [row(message.id, "system", "Compaction summary", message.summary)]
+  if (message.type === "system" || message.type === "synthetic" || message.type === "skill") return [row(message.id, "system", message.type === "skill" ? `Skill: ${message.name}` : "System message", message.text)]
+  if (message.type === "shell" && message.output) return [row(message.id, "tool", "Shell output", message.output.output)]
   return []
-}
-
-function fileContributor(part: Extract<Part, { type: "file" }>, messageID: string): Contributor {
-  const source = part.source?.text.value ?? ""
-  const metadata = [part.filename, part.mime, part.url].filter(Boolean).join(" ")
-  return contributor(part.id, messageID, "file", `File attachment: ${part.filename ?? part.mime}`, source || metadata)
 }
 
 function contributor(id: string, messageID: string, category: ContributorCategory, label: string, text: string): Contributor {
@@ -192,9 +193,9 @@ function contributor(id: string, messageID: string, category: ContributorCategor
   }
 }
 
-function resolveModel(providers: ReadonlyArray<Provider>, providerID: string, modelID: string) {
+function resolveModel(providers: ReadonlyArray<ProviderInfo>, models: ReadonlyArray<ModelInfo>, providerID: string, modelID: string) {
   const provider = providers.find((item) => item.id === providerID)
-  const model = provider?.models[modelID]
+  const model = models.find((item) => item.providerID === providerID && item.id === modelID)
   return {
     providerID,
     providerName: provider?.name,
@@ -204,27 +205,25 @@ function resolveModel(providers: ReadonlyArray<Provider>, providerID: string, mo
   }
 }
 
-function environmentItems(
-  config: unknown,
-  mcp: ReadonlyArray<{ name: string; status: string; error?: string }> = [],
-  tools: ReadonlyArray<{ id: string; description?: string }> = [],
-) {
-  const value = record(config) ? config : {}
+function environmentItems(input: SnapshotInput) {
+  const value = record(input.config) ? input.config : {}
   const rows: EnvironmentItem[] = []
   const instructions = Array.isArray(value.instructions) ? value.instructions : []
   for (const instruction of instructions) {
     if (typeof instruction === "string") rows.push({ category: "instruction", name: instruction })
   }
-  for (const [name, agent] of entries(value.agent)) {
+  for (const [name, agent] of entries(value.agents)) {
     rows.push({ category: "agent", name, detail: record(agent) && typeof agent.description === "string" ? agent.description : undefined })
   }
-  const skills = record(value.skills) && Array.isArray(value.skills.paths) ? value.skills.paths : []
+  const skills = Array.isArray(value.skills) ? value.skills : []
   for (const skill of skills) {
     if (typeof skill === "string") rows.push({ category: "skill", name: skill })
   }
-  for (const item of mcp) rows.push({ category: "mcp", name: item.name, detail: item.error ?? item.status })
-  for (const item of tools) rows.push({ category: "tool", name: item.id, detail: item.description })
-  return rows.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))
+  for (const item of input.agents ?? []) rows.push({ category: "agent", name: item.id, detail: item.description })
+  for (const item of input.skills ?? []) rows.push({ category: "skill", name: item.id, detail: item.description })
+  for (const item of input.mcp ?? []) rows.push({ category: "mcp", name: item.name, detail: "error" in item.status ? item.status.error : item.status.status })
+  for (const item of input.tools ?? []) rows.push({ category: "tool", name: item.id, detail: item.description })
+  return dedupe(rows, (item) => `${item.category}:${item.name}`).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))
 }
 
 function entries(value: unknown): Array<[string, unknown]> {

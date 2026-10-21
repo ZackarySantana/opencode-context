@@ -9,7 +9,7 @@ const declarations = Bun.spawn(["bunx", "tsc", "-p", "tsconfig.build.json"], {
 })
 
 const result = await Bun.build({
-  entrypoints: ["src/tui.tsx"],
+  entrypoints: ["src/index.ts", "src/tui.tsx"],
   outdir: "dist",
   target: "bun",
   format: "esm",

@@ -1,6 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { homedir } from "node:os"
 import type { ContextSnapshot } from "./snapshot.js"
+
+export function exportStatePath(env: NodeJS.ProcessEnv = process.env) {
+  return join(env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "opencode")
+}
 
 const SECRET_PATTERNS = [
   /\b(?:sk|pk|ghp|github_pat|xox[baprs])-[-_a-z0-9]{12,}\b/gi,

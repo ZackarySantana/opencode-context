@@ -28,7 +28,7 @@ Published on npm as [`opencode-context-tui`](https://www.npmjs.com/package/openc
 
 ## Requirements
 
-- OpenCode 1.18.11 or newer within the 1.x release line
+- OpenCode 2.1.1 or newer within the 2.x release line
 - Bun, which is already used by OpenCode's plugin runtime
 
 The TUI plugin API is new and version-coupled. This package declares an `engines.opencode` range so incompatible OpenCode versions skip it rather than loading an unsupported interface.
@@ -38,12 +38,21 @@ The TUI plugin API is new and version-coupled. This package declares an `engines
 Install globally so `/context` is available from every project:
 
 ```sh
-opencode plugin --global opencode-context-tui
+opencode plugin add opencode-context-tui
 ```
 
-The package exposes a TUI entrypoint only. OpenCode updates `~/.config/opencode/tui.json` for the native modal.
+The package exposes V2 server and TUI entrypoints. The server component only exposes a read-only list of available tools; the TUI builds and displays the report. OpenCode loads both from the global plugin configuration.
 
-Quit and restart OpenCode after installation. Plugin configuration is loaded only at startup.
+Alternatively, add the package to `plugins` in `~/.config/opencode/opencode.json(c)` (preserving existing entries):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["opencode-context-tui"]
+}
+```
+
+Restart OpenCode if the modal is not available after installation.
 
 Then run inside a session:
 
@@ -71,26 +80,46 @@ The report keeps three kinds of data separate:
 
 Estimated values are not provider billing totals or an exact reconstruction of the next provider request. OpenCode does not expose the final provider payload or every hidden system-prompt layer through a stable public API.
 
+V2's retained-context API supplies the content estimate, including retained compaction summaries. Recorded usage and activity still cover session history. If an API is unavailable, the report falls back to cached data where possible and lists the limitation in exported snapshots. The latest checkpoint is identified by its V2 compaction message ID.
+
 ## Export
 
 Press `e` to write a redacted JSON snapshot under:
 
 ```text
-<opencode-state>/opencode-context-tui/exports/
+$XDG_STATE_HOME/opencode/opencode-context-tui/exports/
 ```
 
-Exports are explicit and stored outside the worktree by default. Likely secrets are redacted, and contributor previews are omitted. Review an export before sharing it.
+When `XDG_STATE_HOME` is unset, the base is `~/.local/state`. Exports are explicit and stored on the terminal client's machine, outside the worktree by default, including when connected to a remote server. Likely secrets are redacted, and contributor previews are omitted. Review an export before sharing it.
 
 ## Development
 
+Mise pins Bun to 1.4.3 for this project:
+
 ```sh
+mise install
 bun install
-bun test
+bun run test
 bun run typecheck
 bun run build
 ```
 
-To load a local checkout, reference its absolute directory in OpenCode's TUI plugin configuration, then restart OpenCode.
+To load a built local checkout, add its absolute directory to `plugins` in `opencode.json(c)`, then restart OpenCode:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["/absolute/path/to/opencode-context"]
+}
+```
+
+For a remote service, install the package on that service; its TUI entrypoint loads in the connected CLI. A CLI-only installation under `~/.config/opencode/cli.json` can display the report without the server component, but cannot list the available tool catalog.
+
+## V1 migration
+
+This version uses the V2 plugin API and does not run on OpenCode 1.x. Remove the old entry from `tui.json` and install/configure the plugin as above. `/context`, its three tabs, keyboard controls, automatic refresh, and redacted JSON exports remain available.
+
+Migration references: [V1 plugin migration](https://opencode.ai/v2/docs/build/plugins/migrate-v1), [CLI plugin API](https://opencode.ai/v2/docs/build/plugins/cli), and [plugin RPC](https://opencode.ai/v2/docs/build/plugins/rpc).
 
 ## Data Model
 

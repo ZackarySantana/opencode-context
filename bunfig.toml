@@ -1,0 +1,3 @@
+[test]
+# Match OpenCode's reactive Solid runtime rather than Solid's Node/SSR entrypoint.
+preload = ["@opentui/solid/preload"]

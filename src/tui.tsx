@@ -1,17 +1,17 @@
 /** @jsxImportSource @opentui/solid */
 
-import type { Message, Part } from "@opencode-ai/sdk/v2"
 import type { RGBA } from "@opentui/core"
-import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
+import { Plugin } from "@opencode/plugin/tui"
+import type { Context } from "@opencode/plugin/tui/context"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js"
-import { writeSnapshot } from "./export.js"
+import { exportStatePath, writeSnapshot } from "./export.js"
 import { formatPercent, formatTokens, shorten } from "./format.js"
 import { buildSnapshot, type ContextSnapshot, type Contributor, type EnvironmentItem } from "./snapshot.js"
+import { loadSnapshot } from "./load.js"
 
-const MODE = "modal"
+const MODE = "opencode-context-tui.modal"
 const tabs = ["Overview", "Content", "Environment"] as const
-type Tab = (typeof tabs)[number]
 type Color = RGBA | string
 type Skin = {
   background: Color
@@ -37,46 +37,34 @@ const commands = {
   export: "opencode-context-tui.export",
 }
 
-type Controller = {
-  close: () => void
-  next: () => void
-  previous: () => void
-  down: () => void
-  up: () => void
-  refresh: () => Promise<void>
-  export: () => Promise<void>
-}
-
-export function currentSessionID(api: Pick<TuiPluginApi, "route">) {
-  const route = api.route.current
-  return route.name === "session" && "params" in route && typeof route.params?.sessionID === "string"
-    ? route.params.sessionID
-    : undefined
+export function currentSessionID(api: Pick<Context, "ui">) {
+  const route = api.ui.router.current()
+  return route.type === "session" ? route.sessionID : undefined
 }
 
 export function narrowLayout(width: number) {
   return width < 120
 }
 
-function skin(api: TuiPluginApi): Skin {
-  const theme = api.theme.current
+function skin(api: Context): Skin {
+  const theme = api.theme.surface("dialog")
   return {
-    background: theme.background,
-    panel: theme.backgroundPanel,
-    border: theme.border,
-    activeBorder: theme.borderActive,
-    text: theme.text,
-    muted: theme.textMuted,
-    primary: theme.primary,
-    success: theme.success,
-    warning: theme.warning,
-    error: theme.error,
+    background: theme.background.base,
+    panel: theme.background.raised.base,
+    border: theme.border.base,
+    activeBorder: theme.text.action.primary.base,
+    text: theme.text.base,
+    muted: theme.text.muted,
+    primary: theme.text.action.primary.base,
+    success: theme.text.feedback.success.base,
+    warning: theme.text.feedback.warning.base,
+    error: theme.text.feedback.error.base,
   }
 }
 
-function ContextDialog(props: { api: TuiPluginApi; sessionID?: string; register: (controller: Controller) => void }) {
+function ContextDialog(props: { api: Context; sessionID?: string }) {
   const dimensions = useTerminalDimensions()
-  const colors = skin(props.api)
+  const colors = createMemo(() => skin(props.api))
   const [tabIndex, setTabIndex] = createSignal(0)
   const [selected, setSelected] = createSignal(0)
   const [snapshot, setSnapshot] = createSignal(emptySnapshot(props.sessionID))
@@ -108,33 +96,37 @@ function ContextDialog(props: { api: TuiPluginApi; sessionID?: string; register:
   }
   const exportCurrent = async () => {
     try {
-      const path = await writeSnapshot(props.api.state.path.state, snapshot())
-      props.api.ui.toast({ variant: "success", title: "Context exported", message: path })
+      const path = await writeSnapshot(exportStatePath(), snapshot())
+      props.api.ui.toast.show({ variant: "success", title: "Context exported", message: path })
     } catch (error) {
-      props.api.ui.toast({ variant: "error", title: "Export failed", message: error instanceof Error ? error.message : String(error) })
+      props.api.ui.toast.show({ variant: "error", title: "Export failed", message: error instanceof Error ? error.message : String(error) })
     }
   }
 
-  props.register({
-    close: () => props.api.ui.dialog.clear(),
-    next: () => switchTab(1),
-    previous: () => switchTab(-1),
-    down: () => move(1),
-    up: () => move(-1),
-    refresh,
-    export: exportCurrent,
-  })
+  const popMode = props.api.keymap.mode.push(MODE)
+  props.api.keymap.layer(() => ({
+    mode: MODE,
+    priority: 100,
+    commands: [
+      { id: commands.close, bind: "escape", run: () => props.api.ui.dialog.clear() },
+      { id: commands.next, bind: "right,l", run: () => switchTab(1) },
+      { id: commands.previous, bind: "left,h", run: () => switchTab(-1) },
+      { id: commands.down, bind: "down,j", run: () => move(1) },
+      { id: commands.up, bind: "up,k", run: () => move(-1) },
+      { id: commands.refresh, bind: "r", run: refresh },
+      { id: commands.export, bind: "e", run: exportCurrent },
+    ],
+  }))
 
   onMount(() => void refresh())
-  const disposers = [
-    props.api.event.on("message.updated", scheduleRefresh),
-    props.api.event.on("message.part.updated", scheduleRefresh),
-    props.api.event.on("message.part.removed", scheduleRefresh),
-  ]
+  const stop = props.api.data.listen(({ details }) => {
+    if ("sessionID" in details.data && details.data.sessionID === props.sessionID) scheduleRefresh()
+  })
   onCleanup(() => {
     generation += 1
     if (pending) clearTimeout(pending)
-    for (const dispose of disposers) dispose()
+    stop()
+    popMode()
   })
 
   const bodyHeight = () => Math.max(12, Math.min(dimensions().height - 10, 28))
@@ -142,24 +134,24 @@ function ContextDialog(props: { api: TuiPluginApi; sessionID?: string; register:
   return (
       <box width="100%" maxWidth="100%" overflow="hidden" flexDirection="column" paddingBottom={1} paddingLeft={2} paddingRight={2}>
         <box flexDirection="row" justifyContent="space-between" paddingBottom={1}>
-          <text fg={colors.text}><b>Current context</b><span style={{ fg: colors.muted }}> {shorten(snapshot().sessionID ?? "no active session", 30)}</span></text>
-          <text fg={colors.muted}>{loading() ? "refreshing  " : ""}<span style={{ fg: colors.text }}>esc</span> close</text>
+          <text fg={colors().text}><b>Current context</b><span style={{ fg: colors().muted }}> {shorten(snapshot().sessionID ?? "no active session", 30)}</span></text>
+          <text fg={colors().muted}>{loading() ? "refreshing  " : ""}<span style={{ fg: colors().text }}>esc</span> close</text>
         </box>
         <box flexDirection="row" gap={1} paddingBottom={1}>
           {tabs.map((item, index) => (
-            <box border borderColor={index === tabIndex() ? colors.activeBorder : colors.border} paddingLeft={1} paddingRight={1}>
-              <text fg={index === tabIndex() ? colors.primary : colors.muted}>{item}</text>
+            <box border borderColor={index === tabIndex() ? colors().activeBorder : colors().border} paddingLeft={1} paddingRight={1}>
+              <text fg={index === tabIndex() ? colors().primary : colors().muted}>{item}</text>
             </box>
           ))}
         </box>
         <box height={bodyHeight()} flexDirection="column">
-          {!snapshot().available ? <NoSession colors={colors} /> : tab() === "Overview"
-            ? <Overview snapshot={snapshot()} colors={colors} />
+          {!snapshot().available ? <NoSession colors={colors()} /> : tab() === "Overview"
+            ? <Overview snapshot={snapshot()} colors={colors()} />
             : tab() === "Content"
-              ? <Content rows={snapshot().retained.contributors} selected={selected()} colors={colors} height={bodyHeight()} />
-              : <Environment rows={snapshot().environment} selected={selected()} colors={colors} height={bodyHeight()} />}
+              ? <Content rows={snapshot().retained.contributors} selected={selected()} colors={colors()} height={bodyHeight()} />
+              : <Environment rows={snapshot().environment} selected={selected()} colors={colors()} height={bodyHeight()} />}
         </box>
-        <box paddingTop={1}><text fg={colors.muted}><span style={{ fg: colors.text }}>h/l</span> tabs  <span style={{ fg: colors.text }}>j/k</span> rows  <span style={{ fg: colors.text }}>r</span> refresh  <span style={{ fg: colors.text }}>e</span> export</text></box>
+        <box paddingTop={1}><text fg={colors().muted}><span style={{ fg: colors().text }}>h/l</span> tabs  <span style={{ fg: colors().text }}>j/k</span> rows  <span style={{ fg: colors().text }}>r</span> refresh  <span style={{ fg: colors().text }}>e</span> export</text></box>
       </box>
   )
 }
@@ -187,7 +179,7 @@ function Overview(props: { snapshot: ContextSnapshot; colors: Skin }) {
       <Panel title="ACTIVITY" colors={props.colors}>
         <Line label="Messages" value={`${props.snapshot.messageCount.user} user / ${props.snapshot.messageCount.assistant} assistant`} colors={props.colors} />
         <Line label="Tools / compactions" value={`${props.snapshot.toolCalls} / ${props.snapshot.compaction.count}`} colors={props.colors} />
-        <Line label="Latest boundary" value={props.snapshot.compaction.latestBoundary ?? "unavailable"} colors={props.colors} />
+        <Line label="Latest checkpoint" value={props.snapshot.compaction.latestBoundary ?? "unavailable"} colors={props.colors} />
       </Panel>
       <text fg={props.colors.muted}>Provider tokens are <span style={{ fg: props.colors.success }}>recorded</span>. Retained tokens and utilization are <span style={{ fg: props.colors.warning }}>estimated</span>; the final payload is not observable.</text>
     </box>
@@ -265,108 +257,33 @@ function Line(props: { label: string; value: string; colors: Skin; accent?: Colo
   return <text fg={props.colors.muted}>{props.label}: <span style={{ fg: props.accent ?? props.colors.text }}>{shorten(props.value, 48)}</span></text>
 }
 
-async function loadSnapshot(api: TuiPluginApi, sessionID?: string) {
-  if (!sessionID) return emptySnapshot()
-  let messages = api.state.session.messages(sessionID)
-  const remoteParts = new Map<string, ReadonlyArray<Part>>()
-  if (messages.length === 0) {
-    try {
-      const response = await api.client.session.messages({ sessionID, directory: api.state.path.directory })
-      if (response.data) {
-        messages = response.data.map((item) => item.info)
-        for (const item of response.data) remoteParts.set(item.info.id, item.parts)
-      }
-    } catch {
-      // Synchronized state remains the best available source when the client is unavailable.
-    }
-  }
-  const tools = await loadTools(api)
-  return buildSnapshot({
-    sessionID,
-    messages,
-    parts: (messageID) => api.state.part(messageID).length > 0 ? api.state.part(messageID) : remoteParts.get(messageID) ?? [],
-    providers: api.state.provider,
-    config: api.state.config,
-    mcp: api.state.mcp(),
-    tools,
-  })
-}
-
-async function loadTools(api: TuiPluginApi) {
-  try {
-    const client = api.client as unknown as { tool?: { ids?: (input: { directory?: string }) => Promise<{ data?: string[] }> } }
-    const response = await client.tool?.ids?.({ directory: api.state.path.directory })
-    return response?.data?.map((id) => ({ id })) ?? []
-  } catch {
-    return []
-  }
-}
-
 function emptySnapshot(sessionID?: string): ContextSnapshot {
-  return buildSnapshot({ sessionID, messages: [] as Message[], parts: () => [], providers: [] })
+  return buildSnapshot({ sessionID, messages: [], providers: [] })
 }
 
-function registerCommands(api: TuiPluginApi) {
-  api.keymap.registerLayer({
-    commands: [{
-      name: commands.open,
-      title: "Context",
-      desc: "Inspect current-session context usage",
-      category: "Plugin",
-      namespace: "palette",
-      slashName: "context",
-      run() {
-        api.ui.dialog.replace(
-          () => <ContextDialog api={api} sessionID={currentSessionID(api)} register={(value) => { activeStore.value = value }} />,
-          () => {
-            activeStore.value = undefined
-          },
-        )
-        api.ui.dialog.setSize("large")
-      },
-    }],
-  })
-  api.keymap.registerLayer({
-    mode: MODE,
-    enabled: () => activeStore.value !== undefined,
-    commands: [
-      hidden(commands.close, () => activeStore.value?.close()),
-      hidden(commands.next, () => activeStore.value?.next()),
-      hidden(commands.previous, () => activeStore.value?.previous()),
-      hidden(commands.down, () => activeStore.value?.down()),
-      hidden(commands.up, () => activeStore.value?.up()),
-      hidden(commands.refresh, () => { void activeStore.value?.refresh() }),
-      hidden(commands.export, () => { void activeStore.value?.export() }),
-    ],
-    bindings: [
-      { key: "escape", cmd: commands.close, desc: "Close" },
-      { key: "right,l", cmd: commands.next, desc: "Next tab" },
-      { key: "left,h", cmd: commands.previous, desc: "Previous tab" },
-      { key: "down,j", cmd: commands.down, desc: "Next row" },
-      { key: "up,k", cmd: commands.up, desc: "Previous row" },
-      { key: "r", cmd: commands.refresh, desc: "Refresh" },
-      { key: "e", cmd: commands.export, desc: "Export" },
-    ],
-  })
-}
-
-const activeStore: { value?: Controller } = {}
-
-function hidden(name: string, run: () => void) {
-  return { name, title: name, hidden: true, run }
-}
-
-const tui: TuiPlugin = async (api) => {
-  registerCommands(api)
-  api.lifecycle.onDispose(() => {
-    if (api.ui.dialog.open) api.ui.dialog.clear()
-    activeStore.value = undefined
-  })
-}
-
-const plugin: TuiPluginModule & { id: string } = {
+export default Plugin.define({
   id: "opencode-context-tui",
-  tui,
-}
-
-export default plugin
+  setup(api) {
+    let opened = false
+    api.keymap.layer(() => ({
+      mode: "global",
+      commands: [{
+        id: commands.open,
+        title: "Context",
+        description: "Inspect current-session context usage",
+        group: "Plugin",
+        palette: true,
+        slash: { name: "context" },
+        run() {
+          const sessionID = currentSessionID(api)
+          api.ui.dialog.show(() => <ContextDialog api={api} sessionID={sessionID} />, () => { opened = false })
+          opened = true
+          api.ui.dialog.set({ size: "large", centered: true })
+        },
+      }],
+    }))
+    return () => {
+      if (opened) api.ui.dialog.clear()
+    }
+  },
+})
