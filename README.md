@@ -1,3 +1,5 @@
+> Archived: Development has moved to [Opcode](https://github.com/zackarysantana/opcode). Install from that repository instead.
+
 # opencode-context-tui
 
 [![npm](https://img.shields.io/npm/v/opencode-context-tui)](https://www.npmjs.com/package/opencode-context-tui)
